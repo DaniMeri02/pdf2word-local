@@ -1,0 +1,11 @@
+.venv/
+__pycache__/
+node_modules/
+tests/package-lock.json
+spike/pdf/
+spike/docx/
+smoke-pdf/
+smoke-docx/
+web/vendor/
+*.whl
+.DS_Store
