@@ -1,66 +1,71 @@
-# pdf2word-locale
+# pdf2word-local
 
-Convertitore da PDF a Word (DOCX) modificabile che funziona **interamente sul tuo dispositivo**. Il PDF non viene mai caricato su un server: la conversione avviene nel browser, anche in modalità aereo.
+PDF to editable Word (DOCX) converter that runs **entirely on your device**. The PDF is never uploaded to a server: conversion happens in the browser, even in airplane mode.
 
-> Stato: PWA pronta e testata in Chrome (conversione, password, condivisione da altre app, offline). Ripiego Termux incluso.
+**App:** https://danimeri02.github.io/pdf2word-local/ (interface in English or Italian, following the device language)
 
-## Come funziona
+## How it works
 
-- **Motore**: [pdf2docx](https://github.com/ArtifexSoftware/pdf2docx) ricostruisce paragrafi, tabelle, immagini e colonne in un DOCX in flusso editabile. Si appoggia su [PyMuPDF](https://github.com/pymupdf/PyMuPDF).
-- **Pre-elaborazione** (`python/pdf2word/`): i grafici fatti solo di rettangoli e linee vengono convertiti in immagini, altrimenti pdf2docx li scambierebbe per tabelle vuote.
-- **Nel browser**: Python gira con [Pyodide](https://pyodide.org/) in un Web Worker, con PyMuPDF dalla distribuzione Pyodide. Tutto (circa 45 MB) è servito dallo stesso sito e messo in cache dal service worker: dopo il primo avvio funziona anche offline.
-- **Ripiego**: lo stesso motore gira su Android con Termux (`termux/install.sh`).
+- **Engine**: [pdf2docx](https://github.com/ArtifexSoftware/pdf2docx) rebuilds paragraphs, tables, images and columns into a DOCX with editable flow. It relies on [PyMuPDF](https://github.com/pymupdf/PyMuPDF).
+- **Pre-processing** (`python/pdf2word/`): charts made only of rectangles and lines are turned into images; otherwise pdf2docx would mistake them for empty tables.
+- **In the browser**: Python runs with [Pyodide](https://pyodide.org/) in a Web Worker, with PyMuPDF from the Pyodide distribution. Everything (about 45 MB) is served from the same site and cached by the service worker: after the first run it also works offline.
+- **Fallback**: the same engine runs on Android with Termux (`termux/install.sh`).
 
-Funziona con i **PDF digitali**, cioè con testo selezionabile. I PDF scansionati (OCR) non sono supportati.
+It works with **digital PDFs** (selectable text). Scanned PDFs (OCR) are not supported.
 
 ## Privacy
 
-- Nessun upload: il file resta in memoria nel browser.
-- Nessuna analytics e nessuna risorsa esterna a runtime: tutto è servito dallo stesso sito e poi messo in cache per l'uso offline.
-- Il codice è pubblico e verificabile.
+- No uploads: the file stays in the browser's memory.
+- No analytics and no external resources at runtime. A Content-Security-Policy (`connect-src 'self'`) on both page and worker blocks any connection to other sites.
+- The code is public and auditable.
 
-## Struttura
+## Using the app
 
-| Percorso | Contenuto |
+Open the site in Chrome on Android, then menu ⋮ → **Install app**. Then:
+
+- **Choose PDF** inside the app, or
+- from another app (Files, Gmail, …): **Share → PDF to Word**.
+
+The DOCX is saved to Downloads, or **Open with…** sends it straight to Word.
+
+## Known issues
+
+- **Word for Android** opens documents in *mobile view*, which reflows and enlarges the text. Switch to **Print Layout** to see the real page.
+- Some mobile viewers (e.g. the "Documents" app on Realme phones) were seen showing a one-page document on two pages, while Word showed it on one. Prefer Word to open the DOCX.
+
+## Layout
+
+| Path | Content |
 |---|---|
-| `python/pdf2word/` | Motore di conversione condiviso (PWA, Termux, test) |
-| `spike/` | Test di qualità sul computer: genera PDF sintetici e li converte |
-| `web/` | PWA: interfaccia, Web Worker, service worker, manifest |
-| `scripts/prepara_vendor.py` | Scarica e verifica (sha256) Pyodide e pacchetti in `web/vendor/` |
-| `tests/e2e_pwa.mjs` | Test end-to-end in Chrome headless, eseguito prima di ogni deploy |
-| `termux/` | Ripiego da riga di comando per Termux |
-| `.github/workflows/pages.yml` | Prepara, testa e pubblica su GitHub Pages |
-| `docs/adr/` | Decisioni architetturali |
-| `GLOSSARY.md` | Glossario del dominio |
+| `python/pdf2word/` | Shared conversion engine (PWA, Termux, tests) |
+| `spike/` | Desktop quality tests: generate synthetic PDFs and convert them |
+| `web/` | PWA: UI, translations, Web Worker, service worker, manifest |
+| `scripts/prepare_vendor.py` | Download and verify (sha256) Pyodide and packages into `web/vendor/` |
+| `tests/e2e_pwa.mjs` | End-to-end test in headless Chrome, run before every deploy |
+| `termux/` | Command-line fallback for Termux |
+| `.github/workflows/pages.yml` | Prepare, test and publish to GitHub Pages |
+| `docs/adr/` | Architecture decisions |
+| `GLOSSARY.md` | Domain glossary |
 
-## Usare l'app
-
-Apri il sito da Chrome su Android, poi menu ⋮ → **Installa app**. Dopo:
-
-- **Scegli PDF** dall'app, oppure
-- da un'altra app (File, Gmail, …): **Condividi → PDF in Word**.
-
-Il DOCX si scarica in Download, oppure con **Apri con…** va direttamente a Word.
-
-## Test sul computer
+## Desktop tests
 
 ```sh
 cd spike
 python3 -m venv .venv
 .venv/bin/pip install pdf2docx reportlab
-.venv/bin/python genera_pdf.py pdf
-.venv/bin/python converti.py pdf docx
+.venv/bin/python make_test_pdfs.py pdf
+.venv/bin/python convert_all.py pdf docx
 ```
 
-PWA in locale con test end-to-end (serve Chrome):
+PWA locally with the end-to-end test (needs Chrome):
 
 ```sh
-python3 scripts/prepara_vendor.py
+python3 scripts/prepare_vendor.py
 python3 -m http.server 8080 --bind 127.0.0.1 --directory web &
 (cd tests && npm install)
 node tests/e2e_pwa.mjs http://127.0.0.1:8080/ spike/pdf /tmp/e2e-docx
 ```
 
-## Licenza
+## License
 
-[AGPL-3.0](LICENSE). PyMuPDF e MuPDF sono distribuiti da Artifex sotto AGPL-3.0; pdf2docx è MIT.
+[AGPL-3.0](LICENSE). PyMuPDF and MuPDF are distributed by Artifex under AGPL-3.0; pdf2docx is MIT.

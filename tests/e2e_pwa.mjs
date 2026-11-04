@@ -1,17 +1,19 @@
-// Test end-to-end della PWA in Chrome headless (puppeteer-core + Chrome installato).
+// End-to-end test of the PWA in headless Chrome (puppeteer-core + installed Chrome).
 //
-// Prerequisiti: web/vendor/ preparato (scripts/prepara_vendor.py) e web/ servito, es.
+// Prerequisites: web/vendor/ prepared (scripts/prepare_vendor.py) and web/ served, e.g.
 //   python3 -m http.server 8080 --bind 127.0.0.1 --directory web
-// Uso:
-//   node tests/e2e_pwa.mjs http://127.0.0.1:8080/ <cartella_pdf> <cartella_docx_out> [percorso_chrome]
+// Usage:
+//   node tests/e2e_pwa.mjs http://127.0.0.1:8080/ <pdf_dir> <docx_out_dir> [chrome_path]
 //
-// Verifica:
-//  1. avvio del motore e conversione di ogni PDF della cartella dal selettore file;
-//  2. nessuna richiesta verso origini diverse da quella dell'app;
-//  3. la CSP blocca fetch verso altri siti (pagina e worker);
-//  4. PDF protetto: richiesta password, password errata, password giusta;
-//  5. PDF condiviso (POST simulato a ./condividi, come fa Android);
-//  6. modalità offline: ricarica e conversione senza rete.
+// Checks:
+//  1. engine start-up and conversion of every PDF in the folder via the file picker,
+//     with a real download of the DOCX;
+//  2. no request to origins other than the app's;
+//  3. the CSP blocks fetches to other sites (page and worker);
+//  4. protected PDF: password prompt, wrong password, right password;
+//  5. shared PDF (simulated POST to ./share, as Android does);
+//  6. offline mode: reload and convert without network;
+//  7. UI language follows the browser (English / Italian).
 
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
@@ -23,171 +25,179 @@ const puppeteer = require("puppeteer-core");
 const [base, pdfDir, outDir, chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"] =
   process.argv.slice(2);
 if (!base || !pdfDir || !outDir) {
-  console.error("Uso: node tests/e2e_pwa.mjs <url_base> <cartella_pdf> <cartella_docx_out> [chrome]");
+  console.error("Usage: node tests/e2e_pwa.mjs <base_url> <pdf_dir> <docx_out_dir> [chrome]");
   process.exit(2);
 }
-const ORIGINE = new URL(base).origin;
-const TIMEOUT_MOTORE = 5 * 60_000;
-const TIMEOUT_CONVERSIONE = 3 * 60_000;
+const ORIGIN = new URL(base).origin;
+const ENGINE_TIMEOUT = 5 * 60_000;
+const CONVERSION_TIMEOUT = 3 * 60_000;
+const PASSWORD = "test"; // see spike/make_test_pdfs.py
 mkdirSync(outDir, { recursive: true });
 
-let fallimenti = 0;
+let failures = 0;
 const ok = (msg) => console.log(`OK   ${msg}`);
-const ko = (msg) => {
-  fallimenti++;
+const fail = (msg) => {
+  failures++;
   console.error(`FAIL ${msg}`);
 };
 
-// In CI (Ubuntu 24.04) il sandbox di Chrome è bloccato da AppArmor: lì si disattiva.
-const args = ["--no-first-run", ...(process.env.CI ? ["--no-sandbox"] : [])];
+// On CI (Ubuntu 24.04) AppArmor blocks Chrome's sandbox: disable it there.
+const args = ["--no-first-run", "--lang=en-US", ...(process.env.CI ? ["--no-sandbox"] : [])];
 const browser = await puppeteer.launch({ executablePath: chrome, headless: true, args });
 const page = await browser.newPage();
-const esterne = [];
+const external = [];
 page.on("request", (r) => {
   const u = r.url();
-  // example.org è la sonda del test CSP: deve risultare bloccata, non conta come fuga.
-  if (!u.startsWith(ORIGINE) && !u.startsWith("blob:") && !u.startsWith("data:") && !u.startsWith("https://example.org/")) esterne.push(u);
+  // example.org is the CSP probe: it must be blocked, it does not count as a leak.
+  if (!u.startsWith(ORIGIN) && !u.startsWith("blob:") && !u.startsWith("data:") && !u.startsWith("https://example.org/")) external.push(u);
 });
 page.on("console", (m) => {
   if (m.type() === "error") console.log(`  [console] ${m.text()}`);
 });
 
-async function attendiMotore() {
-  await page.waitForSelector('#spia-motore[data-stato="pronto"], #spia-motore[data-stato="errore"]', { timeout: TIMEOUT_MOTORE });
-  const stato = await page.$eval("#spia-motore", (e) => e.dataset.stato);
-  if (stato !== "pronto") throw new Error("motore in errore: " + (await page.$eval("#errore", (e) => e.textContent)));
+async function waitForEngine(p = page) {
+  await p.waitForSelector('#engine-light[data-state="ready"], #engine-light[data-state="error"]', { timeout: ENGINE_TIMEOUT });
+  const state = await p.$eval("#engine-light", (e) => e.dataset.state);
+  if (state !== "ready") throw new Error("engine error: " + (await p.$eval("#error", (e) => e.textContent)));
 }
 
-// Attende la fine della conversione: esito, richiesta password o errore.
-async function attendiFine() {
+// Wait for the end of a conversion: result, password prompt or error.
+async function waitForOutcome() {
   await page.waitForFunction(
-    () => !document.getElementById("esito").hidden || !document.getElementById("form-password").hidden || !document.getElementById("errore").hidden,
-    { timeout: TIMEOUT_CONVERSIONE },
+    () => !document.getElementById("result").hidden || !document.getElementById("password-form").hidden || !document.getElementById("error").hidden,
+    { timeout: CONVERSION_TIMEOUT },
   );
   return page.evaluate(() => ({
-    esito: !document.getElementById("esito").hidden,
-    password: !document.getElementById("form-password").hidden,
-    errore: document.getElementById("errore").hidden ? null : document.getElementById("errore").textContent,
-    testo: document.getElementById("testo-esito").textContent,
+    result: !document.getElementById("result").hidden,
+    password: !document.getElementById("password-form").hidden,
+    wrong: document.getElementById("password-form").dataset.wrong === "true",
+    error: document.getElementById("error").hidden ? null : document.getElementById("error").textContent,
+    text: document.getElementById("result-text").textContent,
   }));
 }
 
-// Download reale: clic su "Scarica DOCX", come farebbe l'utente.
-// (Non si può leggere il blob con fetch: la CSP connect-src 'self' lo blocca.)
+// Real download: click "Download DOCX", as the user would.
+// (The blob cannot be read with fetch: the CSP connect-src 'self' blocks it.)
 const cdp = await page.createCDPSession();
 await cdp.send("Browser.setDownloadBehavior", { behavior: "allow", downloadPath: resolve(outDir), eventsEnabled: true });
 
-async function salvaDocx(nome) {
-  const percorso = join(resolve(outDir), nome);
-  if (existsSync(percorso)) unlinkSync(percorso);
-  const finito = new Promise((ok, no) => {
+async function downloadDocx(name) {
+  const path = join(resolve(outDir), name);
+  if (existsSync(path)) unlinkSync(path);
+  const done = new Promise((res, rej) => {
     const h = (e) => {
-      if (e.state === "completed") { cdp.off("Browser.downloadProgress", h); ok(); }
-      if (e.state === "canceled") { cdp.off("Browser.downloadProgress", h); no(new Error("download annullato")); }
+      if (e.state === "completed") { cdp.off("Browser.downloadProgress", h); res(); }
+      if (e.state === "canceled") { cdp.off("Browser.downloadProgress", h); rej(new Error("download canceled")); }
     };
     cdp.on("Browser.downloadProgress", h);
   });
-  await page.click("#scarica");
-  await finito;
-  return readFileSync(percorso);
+  await page.click("#download");
+  await done;
+  return readFileSync(path);
 }
 
-async function convertiFile(percorso) {
+async function convertFile(path) {
   await page.evaluate(() => {
-    document.getElementById("esito").hidden = true;
-    document.getElementById("errore").hidden = true;
+    document.getElementById("result").hidden = true;
+    document.getElementById("error").hidden = true;
   });
   const input = await page.$("#file");
-  await input.uploadFile(percorso);
-  return attendiFine();
+  await input.uploadFile(path);
+  return waitForOutcome();
 }
 
 try {
-  // 1. Avvio
+  // 1. Start-up
   const t0 = performance.now();
   await page.goto(base, { waitUntil: "load" });
-  await attendiMotore();
-  ok(`motore pronto in ${((performance.now() - t0) / 1000).toFixed(1)}s (primo avvio, con download e cache)`);
+  await waitForEngine();
+  ok(`engine ready in ${((performance.now() - t0) / 1000).toFixed(1)}s (first run, with download and caching)`);
 
-  // 1b. Conversione di ogni PDF
-  const pdfs = readdirSync(pdfDir).filter((n) => n.endsWith(".pdf") && !n.startsWith("protetto")).sort();
+  // 1b. Convert every PDF
+  const pdfs = readdirSync(pdfDir).filter((n) => n.endsWith(".pdf") && !n.startsWith("protected")).sort();
   for (const n of pdfs) {
-    const r = await convertiFile(resolve(pdfDir, n));
-    if (r.esito) {
-      const dati = await salvaDocx(n.replace(/\.pdf$/, ".docx"));
-      dati.subarray(0, 2).toString() === "PK" ? ok(`${n}: ${r.testo}`) : ko(`${n}: il risultato non è un DOCX`);
-    } else ko(`${n}: ${r.errore ?? "nessun esito"}`);
+    const r = await convertFile(resolve(pdfDir, n));
+    if (r.result) {
+      const data = await downloadDocx(n.replace(/\.pdf$/, ".docx"));
+      data.subarray(0, 2).toString() === "PK" ? ok(`${n}: ${r.text}`) : fail(`${n}: the output is not a DOCX`);
+    } else fail(`${n}: ${r.error ?? "no outcome"}`);
   }
 
-  // 3. CSP: la pagina non può contattare altri siti
-  const fetchEsterna = await page.evaluate(() =>
-    fetch("https://example.org/", { mode: "no-cors" }).then(() => "aperto", () => "bloccato"),
+  // 3. CSP: the page cannot reach other sites
+  const externalFetch = await page.evaluate(() =>
+    fetch("https://example.org/", { mode: "no-cors" }).then(() => "open", () => "blocked"),
   );
-  fetchEsterna === "bloccato" ? ok("CSP pagina: fetch esterna bloccata") : ko("CSP pagina: fetch esterna NON bloccata");
-  const cspWorker = await page.evaluate(async () => {
-    const r = await fetch("worker.js");
-    return r.headers.get("content-security-policy") || "";
-  });
-  /connect-src 'self'/.test(cspWorker) ? ok("CSP worker: servito con connect-src 'self'") : ko("CSP worker mancante");
+  externalFetch === "blocked" ? ok("page CSP: external fetch blocked") : fail("page CSP: external fetch NOT blocked");
+  const workerCsp = await page.evaluate(async () => (await fetch("worker.js")).headers.get("content-security-policy") || "");
+  /connect-src 'self'/.test(workerCsp) ? ok("worker CSP: served with connect-src 'self'") : fail("worker CSP missing");
 
-  // 4. PDF protetto
-  const protetti = readdirSync(pdfDir).filter((n) => n.startsWith("protetto") && n.endsWith(".pdf"));
-  for (const n of protetti) {
-    let r = await convertiFile(resolve(pdfDir, n));
-    if (!r.password) ko(`${n}: password non richiesta`);
+  // 4. Protected PDF
+  for (const n of readdirSync(pdfDir).filter((x) => x.startsWith("protected") && x.endsWith(".pdf"))) {
+    let r = await convertFile(resolve(pdfDir, n));
+    if (!r.password) fail(`${n}: no password prompt`);
     else {
-      await page.type("#password", "sbagliata");
-      await page.click("#form-password button");
-      r = await attendiFine();
-      const etichetta = await page.$eval("#etichetta-password", (e) => e.textContent);
-      r.password && /errata/i.test(etichetta) ? ok(`${n}: password errata riconosciuta`) : ko(`${n}: password errata non gestita`);
-      await page.type("#password", "prova");
-      await page.click("#form-password button");
-      r = await attendiFine();
-      r.esito ? ok(`${n}: sbloccato e convertito`) : ko(`${n}: ${r.errore ?? "non convertito"}`);
+      await page.type("#password", "wrong-password");
+      await page.click("#password-form button");
+      r = await waitForOutcome();
+      r.password && r.wrong ? ok(`${n}: wrong password detected`) : fail(`${n}: wrong password not handled`);
+      await page.type("#password", PASSWORD);
+      await page.click("#password-form button");
+      r = await waitForOutcome();
+      r.result ? ok(`${n}: unlocked and converted`) : fail(`${n}: ${r.error ?? "not converted"}`);
     }
   }
 
-  // 5. Condivisione da altra app (POST multipart come Android)
-  const condiviso = pdfs[0];
-  if (condiviso) {
-
-    const b64 = readFileSync(resolve(pdfDir, condiviso)).toString("base64");
-    const stato = await page.evaluate(async (b64, nome) => {
+  // 5. Shared from another app (multipart POST, as Android does)
+  const shared = pdfs[0];
+  if (shared) {
+    const b64 = readFileSync(resolve(pdfDir, shared)).toString("base64");
+    const status = await page.evaluate(async (b64, name) => {
       const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
       const fd = new FormData();
-      fd.append("pdf", new File([bin], nome, { type: "application/pdf" }));
-      const r = await fetch("condividi", { method: "POST", body: fd, redirect: "manual" });
+      fd.append("pdf", new File([bin], name, { type: "application/pdf" }));
+      const r = await fetch("share", { method: "POST", body: fd, redirect: "manual" });
       return r.type === "opaqueredirect" ? 303 : r.status;
-    }, b64, condiviso);
-    await page.goto(new URL("?condiviso=1", base).href, { waitUntil: "load" });
-    await attendiMotore();
-    const r = await attendiFine();
-    const nome = await page.$eval("#nome-file", (e) => e.textContent);
-    r.esito && nome === condiviso
-      ? ok(`condivisione: ${condiviso} ricevuto (POST -> ${stato}) e convertito`)
-      : ko(`condivisione: ${r.errore ?? "nessun esito"} (POST -> ${stato}, nome="${nome}")`);
-    const resti = await page.evaluate(async () => (await (await caches.open("pdf2word-condivisi")).keys()).length);
-    resti === 0 ? ok("condivisione: nessuna copia rimasta in cache") : ko(`condivisione: ${resti} file rimasti in cache`);
+    }, b64, shared);
+    await page.goto(new URL("?shared=1", base).href, { waitUntil: "load" });
+    await waitForEngine();
+    const r = await waitForOutcome();
+    const name = await page.$eval("#file-name", (e) => e.textContent);
+    r.result && name === shared
+      ? ok(`share: ${shared} received (POST -> ${status}) and converted`)
+      : fail(`share: ${r.error ?? "no outcome"} (POST -> ${status}, name="${name}")`);
+    const left = await page.evaluate(async () => (await (await caches.open("pdf2word-shared")).keys()).length);
+    left === 0 ? ok("share: no copy left in the cache") : fail(`share: ${left} files left in the cache`);
   }
 
   // 6. Offline
   await page.setOfflineMode(true);
   const t1 = performance.now();
   await page.reload({ waitUntil: "load" });
-  await attendiMotore();
-  ok(`offline: motore pronto in ${((performance.now() - t1) / 1000).toFixed(1)}s dalla cache`);
+  await waitForEngine();
+  ok(`offline: engine ready in ${((performance.now() - t1) / 1000).toFixed(1)}s from the cache`);
   if (pdfs[1] ?? pdfs[0]) {
-    const r = await convertiFile(resolve(pdfDir, pdfs[1] ?? pdfs[0]));
-    r.esito ? ok(`offline: ${r.testo}`) : ko(`offline: ${r.errore ?? "nessun esito"}`);
+    const r = await convertFile(resolve(pdfDir, pdfs[1] ?? pdfs[0]));
+    r.result ? ok(`offline: ${r.text}`) : fail(`offline: ${r.error ?? "no outcome"}`);
   }
   await page.setOfflineMode(false);
 
-  // 2. Nessuna richiesta esterna
-  esterne.length === 0 ? ok("nessuna richiesta verso altri siti") : ko(`richieste esterne: ${[...new Set(esterne)].join(", ")}`);
+  // 7. UI language
+  const en = await page.$eval("h1", (e) => e.textContent);
+  en === "PDF to Word" ? ok(`language: English UI ("${en}")`) : fail(`language: expected English, got "${en}"`);
+  const itPage = await browser.newPage();
+  await itPage.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, "languages", { get: () => ["it-IT", "it"] });
+  });
+  await itPage.goto(base, { waitUntil: "load" });
+  const it = await itPage.$eval("h1", (e) => e.textContent);
+  it === "PDF in Word" ? ok(`language: Italian UI ("${it}")`) : fail(`language: expected Italian, got "${it}"`);
+  await itPage.close();
+
+  // 2. No external requests
+  external.length === 0 ? ok("no requests to other sites") : fail(`external requests: ${[...new Set(external)].join(", ")}`);
 } catch (e) {
-  ko(String(e?.stack ?? e));
+  fail(String(e?.stack ?? e));
 } finally {
   await browser.close();
 }
-process.exit(fallimenti ? 1 : 0);
+process.exit(failures ? 1 : 0);

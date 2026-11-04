@@ -1,8 +1,8 @@
 {
-  "name": "pdf2word-locale-tests",
+  "name": "pdf2word-local-tests",
   "private": true,
   "type": "module",
-  "description": "Test end-to-end della PWA (Chrome headless)",
+  "description": "End-to-end test of the PWA (headless Chrome)",
   "devDependencies": {
     "puppeteer-core": "^24.43.1"
   }

@@ -4,8 +4,9 @@ node_modules/
 tests/package-lock.json
 spike/pdf/
 spike/docx/
-smoke-pdf/
-smoke-docx/
+spike/cases/
+e2e-pdf/
+e2e-docx/
 web/vendor/
 *.whl
 .DS_Store

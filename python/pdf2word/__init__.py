@@ -1,7 +1,7 @@
-"""Motore di conversione PDF digitale -> DOCX in flusso editabile.
+"""Conversion engine: digital PDF -> DOCX with editable flow.
 
-Stesso codice per: test sul Mac, Web Worker Pyodide della PWA, script Termux.
-Nessun accesso alla rete: lavora solo su byte in memoria.
+Same code for: desktop tests, the PWA's Pyodide Web Worker, the Termux script.
+No network access: works only on bytes in memory.
 """
 
 from __future__ import annotations
@@ -13,51 +13,51 @@ from typing import Callable, Optional
 import pymupdf
 from pdf2docx import Converter
 
-from .grafici import rasterizza_grafici
+from .charts import rasterize_charts
 
-__all__ = ["converti", "PasswordRichiesta"]
+__all__ = ["convert", "PasswordRequired"]
 
-# progress(fatto, totale, fase) — fase: "analisi" | "scrittura"
-Progresso = Callable[[int, int, str], None]
-
-
-class PasswordRichiesta(Exception):
-    """Il PDF è protetto e la password manca o è errata."""
+# progress(done, total, phase) — phase: "parse" | "write"
+Progress = Callable[[int, int, str], None]
 
 
-class _AvanzamentoPagine(logging.Handler):
-    """Intercetta i log di pdf2docx '(i/n) Page p' per riportare l'avanzamento."""
+class PasswordRequired(Exception):
+    """The PDF is protected and the password is missing or wrong."""
 
-    def __init__(self, progress: Progresso):
+
+class _PageProgress(logging.Handler):
+    """Captures pdf2docx's '(i/n) Page p' log records to report progress."""
+
+    def __init__(self, progress: Progress):
         super().__init__(level=logging.INFO)
         self.progress = progress
-        self.fase = "analisi"
+        self.phase = "parse"
 
     def emit(self, record: logging.LogRecord) -> None:
         msg = str(record.msg)
         if "[4/4]" in msg:
-            self.fase = "scrittura"
+            self.phase = "write"
         elif msg == "(%d/%d) Page %d" and record.args:
             i, n, _ = record.args
-            self.progress(i, n, self.fase)
+            self.progress(i, n, self.phase)
 
 
-def converti(pdf: bytes, password: Optional[str] = None, progress: Optional[Progresso] = None) -> bytes:
-    """Converte i byte di un PDF digitale nei byte di un DOCX."""
+def convert(pdf: bytes, password: Optional[str] = None, progress: Optional[Progress] = None) -> bytes:
+    """Convert the bytes of a digital PDF into the bytes of a DOCX."""
     doc = pymupdf.open(stream=pdf, filetype="pdf")
     if doc.needs_pass and not doc.authenticate(password or ""):
-        raise PasswordRichiesta()
-    # Grafici a barre & simili -> immagini, altrimenti diventano tabelle vuote.
-    if rasterizza_grafici(doc):
+        raise PasswordRequired()
+    # Bar charts & similar -> images, otherwise they become empty tables.
+    if rasterize_charts(doc):
         pdf = doc.tobytes(garbage=3, deflate=True, encryption=pymupdf.PDF_ENCRYPT_NONE)
-        password = None  # salvato senza cifratura: password non più necessaria
+        password = None  # saved without encryption: password no longer needed
     doc.close()
 
     logger = logging.getLogger()
     handler = None
-    livello = logger.level
+    level = logger.level
     if progress:
-        handler = _AvanzamentoPagine(progress)
+        handler = _PageProgress(progress)
         logger.addHandler(handler)
         logger.setLevel(logging.INFO)
     try:
@@ -70,5 +70,5 @@ def converti(pdf: bytes, password: Optional[str] = None, progress: Optional[Prog
     finally:
         if handler:
             logger.removeHandler(handler)
-            logger.setLevel(livello)
+            logger.setLevel(level)
     return out.getvalue()

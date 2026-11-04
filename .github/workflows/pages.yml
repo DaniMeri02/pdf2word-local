@@ -1,19 +1,19 @@
-# Pubblica la PWA (web/) su GitHub Pages, solo se il test end-to-end passa.
+# Publish the PWA (web/) to GitHub Pages, only if the end-to-end test passes.
 #
-# 1. scripts/prepara_vendor.py scarica (con verifica sha256) runtime Pyodide,
-#    pacchetti (PyMuPDF compreso) e wheel PyPI in web/vendor/
-# 2. tests/e2e_pwa.mjs apre l'app in Chrome headless e converte PDF di prova:
-#    selettore, password, condivisione, offline, nessuna richiesta esterna
-# 3. deploy su Pages
+# 1. scripts/prepare_vendor.py downloads (sha256-checked) the Pyodide runtime,
+#    packages (PyMuPDF included) and PyPI wheels into web/vendor/
+# 2. tests/e2e_pwa.mjs opens the app in headless Chrome and converts test PDFs:
+#    file picker, password, share target, offline, no external requests
+# 3. deploy to Pages
 #
-# Prerequisito (una volta): Settings -> Pages -> Source: "GitHub Actions".
+# One-time prerequisite: Settings -> Pages -> Source: "GitHub Actions".
 
 name: Deploy Pages
 
 on:
   push:
     branches: [main]
-    paths: ["web/**", "python/**", "scripts/**", "tests/**", "spike/genera_pdf.py", ".github/workflows/pages.yml"]
+    paths: ["web/**", "python/**", "scripts/**", "tests/**", "spike/make_test_pdfs.py", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -36,19 +36,19 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Prepara web/vendor
-        run: python scripts/prepara_vendor.py
+      - name: Prepare web/vendor
+        run: python scripts/prepare_vendor.py
 
-      - name: Genera PDF di prova
+      - name: Generate test PDFs
         run: |
           pip install reportlab numpy opencv-python-headless pymupdf
-          python spike/genera_pdf.py e2e-pdf
+          python spike/make_test_pdfs.py e2e-pdf
 
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
 
-      - name: Test end-to-end in Chrome headless
+      - name: End-to-end test in headless Chrome
         run: |
           (cd tests && npm install --no-audit --no-fund)
           python -m http.server 8080 --bind 127.0.0.1 --directory web &

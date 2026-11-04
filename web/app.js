@@ -1,247 +1,246 @@
-// Interfaccia: registra il service worker (cache offline + CSP), avvia il Web Worker
-// con il motore e gestisce scelta del file, avanzamento, password e download.
-// Il PDF passa solo tra questa pagina e il worker: nessuna richiesta di rete.
+// UI: registers the service worker (offline cache + CSP), starts the Web Worker
+// with the engine and handles file choice, progress, password and download.
+// The PDF only travels between this page and the worker: no network requests.
 
+/* global t, applyStaticStrings */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
 const el = {
-  spia: $("spia-motore"),
-  testoMotore: $("testo-motore"),
-  notaMotore: $("nota-motore"),
-  scegli: $("scegli"),
+  light: $("engine-light"),
+  engineText: $("engine-text"),
+  engineNote: $("engine-note"),
+  choose: $("choose"),
   file: $("file"),
-  nomeFile: $("nome-file"),
-  formPassword: $("form-password"),
-  etichettaPassword: $("etichetta-password"),
+  fileName: $("file-name"),
+  passwordForm: $("password-form"),
+  passwordLabel: $("password-label"),
   password: $("password"),
-  avanzamento: $("avanzamento"),
-  barra: $("barra"),
-  testoAvanzamento: $("testo-avanzamento"),
-  esito: $("esito"),
-  testoEsito: $("testo-esito"),
-  scarica: $("scarica"),
-  condividi: $("condividi"),
-  errore: $("errore"),
+  progress: $("progress"),
+  bar: $("bar"),
+  progressText: $("progress-text"),
+  result: $("result"),
+  resultText: $("result-text"),
+  download: $("download"),
+  share: $("share"),
+  error: $("error"),
 };
 
-const MIME_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 let worker = null;
-let motorePronto = false;
-let corrente = null; // {id, nome, pdf: ArrayBuffer, inizio}
-let urlDocx = null;
-let fileDocx = null;
-let inAttesa = null; // file arrivato prima che il motore fosse pronto
+let engineReady = false;
+let current = null; // {id, name, pdf: ArrayBuffer, start}
+let docxUrl = null;
+let docxFile = null;
+let pending = null; // file received before the engine was ready
 
-function mostra(elemento, visibile) {
-  elemento.hidden = !visibile;
+function show(element, visible) {
+  element.hidden = !visible;
 }
 
-function statoMotore(testo, stato = "carica") {
-  el.testoMotore.textContent = testo;
-  el.spia.dataset.stato = stato;
+function engineState(text, state = "loading") {
+  el.engineText.textContent = text;
+  el.light.dataset.state = state;
 }
 
-function errore(msg) {
-  el.errore.textContent = msg;
-  mostra(el.errore, Boolean(msg));
+function showError(msg) {
+  el.error.textContent = msg;
+  show(el.error, Boolean(msg));
 }
 
-function abilitaScelta(si) {
-  el.file.disabled = !si;
-  el.scegli.setAttribute("aria-disabled", String(!si));
+function enableChoose(yes) {
+  el.file.disabled = !yes;
+  el.choose.setAttribute("aria-disabled", String(!yes));
+}
+
+function session(action, key) {
+  try {
+    return action === "get" ? sessionStorage.getItem(key) : action === "set" ? sessionStorage.setItem(key, "1") : sessionStorage.removeItem(key);
+  } catch {
+    return null; // storage unavailable
+  }
 }
 
 // --- Service worker ---------------------------------------------------------
 
-async function attendiServiceWorker() {
-  if (!("serviceWorker" in navigator)) {
-    throw new Error("Questo browser non supporta i service worker: usa Chrome aggiornato.");
-  }
+async function waitForServiceWorker() {
+  if (!("serviceWorker" in navigator)) throw new Error(t("error.noServiceWorker"));
   const sw = navigator.serviceWorker;
-  const controllato = new Promise((ok) => sw.addEventListener("controllerchange", ok, { once: true }));
+  const controlled = new Promise((ok) => sw.addEventListener("controllerchange", ok, { once: true }));
   await sw.register("sw.js");
   if (sw.controller) return;
-  // Primo avvio: il service worker scarica e mette in cache l'intera app.
-  mostra(el.notaMotore, true);
-  statoMotore("Download dell'app per l'uso offline…");
+  // First run: the service worker downloads and caches the whole app.
+  show(el.engineNote, true);
+  engineState(t("engine.downloading"));
   await sw.ready;
-  await Promise.race([controllato, new Promise((ok) => setTimeout(ok, 3000))]);
+  await Promise.race([controlled, new Promise((ok) => setTimeout(ok, 3000))]);
   if (sw.controller) return;
-  // Service worker attivo ma pagina non controllata (es. ricarica forzata):
-  // senza di lui il worker non riceverebbe la CSP, quindi ricarico una volta.
-  let giàRicaricata = false;
-  try {
-    giàRicaricata = sessionStorage.getItem("ricarica-sw") === "1";
-    sessionStorage.setItem("ricarica-sw", "1");
-  } catch {
-    /* storage non disponibile */
-  }
-  if (giàRicaricata) throw new Error("Service worker non attivo: ricarica la pagina normalmente.");
+  // Service worker active but page not controlled (e.g. hard reload):
+  // without it the worker would not get the CSP, so reload once.
+  if (session("get", "sw-reload")) throw new Error(t("error.serviceWorkerInactive"));
+  session("set", "sw-reload");
   location.reload();
   await new Promise(() => {});
 }
 
 // --- Worker -------------------------------------------------------------------
 
-function avviaWorker() {
+function startWorker() {
   worker = new Worker("worker.js");
   worker.onmessage = ({ data: m }) => {
-    switch (m.tipo) {
-      case "stato":
-        statoMotore(m.testo);
+    switch (m.type) {
+      case "status":
+        engineState(t(m.key));
         break;
-      case "pronto":
-        motorePronto = true;
-        mostra(el.notaMotore, false);
-        statoMotore("Pronto, anche offline", "pronto");
-        abilitaScelta(true);
-        if (inAttesa) {
-          const f = inAttesa;
-          inAttesa = null;
-          converti(f.nome, f.pdf);
+      case "ready":
+        engineReady = true;
+        show(el.engineNote, false);
+        engineState(t("engine.ready"), "ready");
+        enableChoose(true);
+        if (pending) {
+          const f = pending;
+          pending = null;
+          convert(f.name, f.pdf);
         }
         break;
-      case "avanzamento":
-        if (corrente?.id === m.id) avanzamento(m);
+      case "progress":
+        if (current?.id === m.id) progress(m);
         break;
-      case "risultato":
-        if (corrente?.id === m.id) risultato(m.docx);
+      case "result":
+        if (current?.id === m.id) result(m.docx);
         break;
       case "password":
-        if (corrente?.id === m.id) chiediPassword(m.errata);
+        if (current?.id === m.id) askPassword(m.wrong);
         break;
-      case "errore":
-        if (m.id === undefined) statoMotore("Motore non disponibile", "errore");
-        if (m.id === undefined || corrente?.id === m.id) fine(`Errore: ${m.messaggio}`);
+      case "error":
+        if (m.startup) {
+          engineState(t("engine.unavailable"), "error");
+          finish(t("error.engineStart", { message: m.message }));
+        } else if (current?.id === m.id) {
+          finish(t("error.generic", { message: m.message }));
+        }
         break;
     }
   };
   worker.onerror = (e) => {
-    statoMotore("Motore non disponibile", "errore");
-    fine(`Errore del motore: ${e.message || "sconosciuto"}`);
+    engineState(t("engine.unavailable"), "error");
+    finish(t("error.engine", { message: e.message || "?" }));
   };
 }
 
-// --- Conversione ----------------------------------------------------------------
+// --- Conversion ----------------------------------------------------------------
 
-function nomeDocx(nome) {
-  return (nome.replace(/\.pdf$/i, "") || "documento") + ".docx";
+function docxName(name) {
+  return (name.replace(/\.pdf$/i, "") || "document") + ".docx";
 }
 
-function eUnPdf(buf) {
-  const t = new Uint8Array(buf, 0, Math.min(1024, buf.byteLength));
-  return new TextDecoder("latin1").decode(t).includes("%PDF-");
+function isPdf(buf) {
+  const head = new Uint8Array(buf, 0, Math.min(1024, buf.byteLength));
+  return new TextDecoder("latin1").decode(head).includes("%PDF-");
 }
 
-function converti(nome, pdf, password) {
-  errore("");
-  mostra(el.esito, false);
-  mostra(el.formPassword, false);
-  el.nomeFile.textContent = nome;
-  mostra(el.nomeFile, true);
-  if (!eUnPdf(pdf)) {
-    errore("Il file scelto non sembra un PDF.");
+function convert(name, pdf, password) {
+  showError("");
+  show(el.result, false);
+  show(el.passwordForm, false);
+  el.fileName.textContent = name;
+  show(el.fileName, true);
+  if (!isPdf(pdf)) {
+    showError(t("error.notPdf"));
     return;
   }
-  if (!motorePronto) {
-    inAttesa = { nome, pdf };
-    el.nomeFile.textContent = `${nome} — in attesa che il motore sia pronto…`;
+  if (!engineReady) {
+    pending = { name, pdf };
+    el.fileName.textContent = t("file.waiting", { name });
     return;
   }
-  corrente = { id: (corrente?.id ?? 0) + 1, nome, pdf, inizio: performance.now() };
-  abilitaScelta(false);
-  el.barra.value = 0;
-  el.testoAvanzamento.textContent = "Apertura del documento…";
-  mostra(el.avanzamento, true);
-  // Copia: il buffer originale serve se bisogna riprovare con la password.
-  const copia = pdf.slice(0);
-  worker.postMessage({ tipo: "converti", id: corrente.id, pdf: copia, password }, [copia]);
+  current = { id: (current?.id ?? 0) + 1, name, pdf, start: performance.now() };
+  enableChoose(false);
+  el.bar.value = 0;
+  el.progressText.textContent = t("progress.opening");
+  show(el.progress, true);
+  // Copy: the original buffer is needed if we must retry with a password.
+  const copy = pdf.slice(0);
+  worker.postMessage({ type: "convert", id: current.id, pdf: copy, password }, [copy]);
 }
 
-function avanzamento({ fatto, totale, fase }) {
-  // Analisi = 80% del lavoro, scrittura del DOCX = 20%.
-  const quota = fase === "analisi" ? (fatto / totale) * 80 : 80 + (fatto / totale) * 20;
-  el.barra.value = Math.round(quota);
-  el.testoAvanzamento.textContent =
-    fase === "analisi" ? `Analisi pagina ${fatto} di ${totale}` : `Scrittura pagina ${fatto} di ${totale}`;
+function progress({ done, total, phase }) {
+  // Parsing = 80% of the work, writing the DOCX = 20%.
+  const share = phase === "parse" ? (done / total) * 80 : 80 + (done / total) * 20;
+  el.bar.value = Math.round(share);
+  el.progressText.textContent = t(phase === "parse" ? "progress.parse" : "progress.write", { done, total });
 }
 
-function risultato(docx) {
-  const secondi = ((performance.now() - corrente.inizio) / 1000).toFixed(1);
-  const nome = nomeDocx(corrente.nome);
-  if (urlDocx) URL.revokeObjectURL(urlDocx);
-  fileDocx = new File([docx], nome, { type: MIME_DOCX });
-  urlDocx = URL.createObjectURL(fileDocx);
-  el.scarica.href = urlDocx;
-  el.scarica.download = nome;
-  el.testoEsito.textContent = `Fatto in ${secondi} s: ${nome} (${(docx.byteLength / 1024).toFixed(0)} KB)`;
-  mostra(el.condividi, Boolean(navigator.canShare?.({ files: [fileDocx] })));
-  mostra(el.esito, true);
-  fine();
+function result(docx) {
+  const seconds = ((performance.now() - current.start) / 1000).toFixed(1);
+  const name = docxName(current.name);
+  if (docxUrl) URL.revokeObjectURL(docxUrl);
+  docxFile = new File([docx], name, { type: DOCX_MIME });
+  docxUrl = URL.createObjectURL(docxFile);
+  el.download.href = docxUrl;
+  el.download.download = name;
+  el.resultText.textContent = t("result.done", { seconds, name, kb: (docx.byteLength / 1024).toFixed(0) });
+  show(el.share, Boolean(navigator.canShare?.({ files: [docxFile] })));
+  show(el.result, true);
+  finish();
 }
 
-function chiediPassword(errata) {
-  el.etichettaPassword.textContent = errata
-    ? "Password errata, riprova"
-    : "Il PDF è protetto: inserisci la password";
-  mostra(el.avanzamento, false);
-  mostra(el.formPassword, true);
+function askPassword(wrong) {
+  el.passwordLabel.textContent = t(wrong ? "password.wrong" : "password.label");
+  el.passwordForm.dataset.wrong = String(wrong);
+  show(el.progress, false);
+  show(el.passwordForm, true);
   el.password.value = "";
   el.password.focus();
 }
 
-function fine(msgErrore) {
-  mostra(el.avanzamento, false);
-  if (msgErrore) errore(msgErrore);
-  abilitaScelta(motorePronto);
+function finish(errorMsg) {
+  show(el.progress, false);
+  if (errorMsg) showError(errorMsg);
+  enableChoose(engineReady);
   el.file.value = "";
 }
 
-// --- PDF condiviso da un'altra app (Web Share Target) ----------------------------
+// --- PDF shared from another app (Web Share Target) ------------------------------
 
-async function leggiCondiviso() {
-  const parametri = new URLSearchParams(location.search);
-  if (!parametri.has("condiviso")) return;
+async function readShared() {
+  if (!new URLSearchParams(location.search).has("shared")) return;
   history.replaceState(null, "", location.pathname);
-  const cache = await caches.open("pdf2word-condivisi");
-  const chiave = new URL("condiviso.pdf", document.baseURI).href;
-  const r = await cache.match(chiave);
+  const cache = await caches.open("pdf2word-shared");
+  const key = new URL("shared.pdf", document.baseURI).href;
+  const r = await cache.match(key);
   if (!r) return;
-  await cache.delete(chiave); // nessuna copia resta nel browser
-  const nome = decodeURIComponent(r.headers.get("X-Nome-File") || "documento.pdf");
-  converti(nome, await r.arrayBuffer());
+  await cache.delete(key); // no copy stays in the browser
+  const name = decodeURIComponent(r.headers.get("X-File-Name") || "document.pdf");
+  convert(name, await r.arrayBuffer());
 }
 
-// --- Eventi ---------------------------------------------------------------------
+// --- Events ---------------------------------------------------------------------
 
 el.file.addEventListener("change", async () => {
   const f = el.file.files?.[0];
-  if (f) converti(f.name, await f.arrayBuffer());
+  if (f) convert(f.name, await f.arrayBuffer());
 });
 
-el.formPassword.addEventListener("submit", (ev) => {
+el.passwordForm.addEventListener("submit", (ev) => {
   ev.preventDefault();
-  if (corrente) converti(corrente.nome, corrente.pdf, el.password.value);
+  if (current) convert(current.name, current.pdf, el.password.value);
 });
 
-el.condividi.addEventListener("click", () => {
-  navigator.share({ files: [fileDocx], title: fileDocx.name }).catch(() => {});
+el.share.addEventListener("click", () => {
+  navigator.share({ files: [docxFile], title: docxFile.name }).catch(() => {});
 });
 
 (async () => {
+  applyStaticStrings();
   try {
-    await attendiServiceWorker();
-    try {
-      sessionStorage.removeItem("ricarica-sw");
-    } catch {
-      /* storage non disponibile */
-    }
-    statoMotore("Avvio del motore…");
-    avviaWorker();
-    await leggiCondiviso();
+    await waitForServiceWorker();
+    session("remove", "sw-reload");
+    engineState(t("engine.starting"));
+    startWorker();
+    await readShared();
   } catch (e) {
-    statoMotore("Avvio non riuscito", "errore");
-    errore(e.message || String(e));
+    engineState(t("engine.startFailed"), "error");
+    showError(e.message || String(e));
   }
 })();

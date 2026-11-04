@@ -1,20 +1,20 @@
 ---
-status: accepted, in parte superata da ADR-0002 (PyMuPDF dalla distribuzione Pyodide)
+status: accepted, partly superseded by ADR-0002 (PyMuPDF from the Pyodide distribution)
 ---
 
-# pdf2docx dentro Pyodide, con una wheel PyMuPDF wasm compilata da noi
+# pdf2docx inside Pyodide, with a PyMuPDF wasm wheel we build ourselves
 
-Il PDF non deve mai lasciare il telefono, e serve un DOCX in flusso editabile con tabelle, colonne e immagini. Per questo il motore di conversione è pdf2docx (Python), eseguito nel browser con Pyodide. PyMuPDF non è distribuito per Pyodide e non si installa con micropip, per via delle librerie condivise. Lo compiliamo noi in GitHub Actions (`.github/workflows/build-pymupdf-wasm.yml`, procedura ufficiale tramite cibuildwheel) e lo pubblichiamo come release. La versione di Pyodide è fissata in `web/pyodide-version.txt`, e la wheel va ricompilata a ogni cambio di versione.
+The PDF must never leave the phone, and we need a DOCX with editable flow (tables, columns, images). So the conversion engine is pdf2docx (Python), run in the browser with Pyodide. PyMuPDF is not shipped for Pyodide and cannot be installed with micropip (shared libraries): we build it ourselves in GitHub Actions (official procedure via cibuildwheel) and publish it as a release. The Pyodide version is pinned in `web/pyodide-version.txt`; the wheel must be rebuilt whenever it changes.
 
-## Opzioni considerate
+## Considered options
 
-- **pdf.js + libreria JS `docx`**: estrae solo testo. Perde tabelle, colonne e immagini, e non esiste un progetto maturo.
-- **LibreOffice (Termux/proot)**: importa il PDF come disegno, con caselle posizionate. È un layout posizionato, non un flusso editabile.
-- **App Android nativa (pdfbox-android + Apache POI)**: la ricostruzione del layout andrebbe riscritta da zero.
-- **Termux con pdf2docx**: stessa qualità, più affidabile da installare, ma si usa solo da riga di comando. Resta come ripiego e usa lo stesso modulo `python/pdf2word`.
+- **pdf.js + JS `docx` library**: extracts text only. Loses tables, columns and images, and no mature project exists.
+- **LibreOffice (Termux/proot)**: imports the PDF as a drawing, with positioned boxes. That is a positioned layout, not an editable flow.
+- **Native Android app (pdfbox-android + Apache POI)**: the layout reconstruction would have to be rewritten from scratch.
+- **Termux with pdf2docx**: same quality and easier to install reliably, but command line only. Kept as a fallback, using the same `python/pdf2word` module.
 
-## Conseguenze
+## Consequences
 
-- Il primo caricamento della PWA scarica circa 30 MB (runtime e pacchetti Pyodide), più la wheel PyMuPDF. Dopo funziona offline dalla cache.
-- PyMuPDF/MuPDF sono AGPL-3.0, quindi il repo è pubblico e ha licenza AGPL-3.0.
-- pdf2docx non è più mantenuto attivamente da Artifex. I difetti si correggono nel nostro pre-processing (vedi `python/pdf2word/grafici.py`), non nel pacchetto.
+- The PWA's first load downloads about 30 MB (Pyodide runtime and packages) plus the PyMuPDF wheel. After that it works offline from the cache.
+- PyMuPDF/MuPDF are AGPL-3.0, so the repo is public and licensed AGPL-3.0.
+- pdf2docx is no longer actively maintained by Artifex. Defects are fixed in our pre-processing (see `python/pdf2word/charts.py`), not in the package.
