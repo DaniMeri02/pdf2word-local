@@ -20,7 +20,7 @@ DST = Path(sys.argv[2] if len(sys.argv) > 2 else "docx")
 DST.mkdir(parents=True, exist_ok=True)
 logging.getLogger().setLevel(logging.WARNING)
 
-for pdf in sorted(SRC.glob("*.pdf")):
+for pdf in sorted(p for p in SRC.glob("*.pdf") if not p.name.startswith("protetto")):
     out = DST / (pdf.stem + ".docx")
     dati = pdf.read_bytes()
     with pymupdf.open(stream=dati) as d:

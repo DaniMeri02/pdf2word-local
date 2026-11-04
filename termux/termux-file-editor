@@ -1,0 +1,23 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Termux lo esegue quando condividi un file verso Termux e scegli "Edit"
+# (installato in ~/bin/ da install.sh). Converte il PDF e salva il DOCX in Download.
+set -euo pipefail
+
+QUI="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+pdf="$1"
+
+case "${pdf,,}" in
+  *.pdf) ;;
+  *) echo "Non è un PDF: $pdf"; read -rp "Invio per chiudere"; exit 1 ;;
+esac
+
+dest="$HOME/storage/downloads/$(basename "${pdf%.*}").docx"
+if python "$QUI/converti.py" "$pdf" "$dest"; then
+  # Il PDF ricevuto è una copia temporanea di Termux: la elimino.
+  rm -f "$pdf"
+  echo "Salvato in Download: $(basename "$dest")"
+  termux-open "$dest" || true
+else
+  echo "Conversione non riuscita."
+fi
+read -rp "Invio per chiudere"

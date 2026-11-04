@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; connect-src 'self'; worker-src 'self'; img-src 'self' blob: data:; style-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="theme-color" content="#1f4e8c">
+  <meta name="description" content="Converte PDF in Word modificabile direttamente sul dispositivo. Il file non viene mai caricato su un server.">
+  <title>PDF in Word</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icone/icona-192.png">
+  <link rel="apple-touch-icon" href="icone/icona-192.png">
+  <link rel="stylesheet" href="stile.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <h1>PDF in Word</h1>
+      <p class="sottotitolo">Conversione sul dispositivo: il file non lascia mai il telefono.</p>
+    </header>
+
+    <section id="motore" class="scheda" aria-live="polite">
+      <div class="riga">
+        <span class="spia" id="spia-motore" data-stato="carica"></span>
+        <span id="testo-motore">Preparazione…</span>
+      </div>
+      <p class="nota" id="nota-motore" hidden>Solo al primo avvio vengono scaricati circa 50 MB, poi l'app funziona anche offline.</p>
+    </section>
+
+    <section class="scheda">
+      <label class="bottone primario" id="scegli" aria-disabled="true">
+        <input type="file" id="file" accept="application/pdf,.pdf" disabled>
+        Scegli PDF
+      </label>
+      <p class="nome-file" id="nome-file" hidden></p>
+
+      <form id="form-password" hidden>
+        <label for="password" id="etichetta-password">Il PDF è protetto: inserisci la password</label>
+        <div class="riga">
+          <input type="password" id="password" autocomplete="off" required>
+          <button type="submit" class="bottone">Sblocca</button>
+        </div>
+      </form>
+
+      <div id="avanzamento" hidden>
+        <progress id="barra" max="100" value="0"></progress>
+        <p id="testo-avanzamento" aria-live="polite"></p>
+      </div>
+
+      <div id="esito" hidden>
+        <p id="testo-esito"></p>
+        <div class="azioni">
+          <a class="bottone primario" id="scarica" download>Scarica DOCX</a>
+          <button type="button" class="bottone" id="condividi" hidden>Apri con…</button>
+        </div>
+      </div>
+
+      <p class="errore" id="errore" role="alert" hidden></p>
+    </section>
+
+    <footer>
+      <p>Funziona con PDF digitali (testo selezionabile). I PDF scansionati non sono supportati.</p>
+      <p>Nessun upload, nessun tracciamento. <a href="https://github.com/DaniMeri02/pdf2word-locale" rel="noreferrer">Codice sorgente</a> (AGPL-3.0).</p>
+    </footer>
+  </main>
+</body>
+</html>

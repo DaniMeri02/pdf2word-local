@@ -2,5 +2,8 @@
   "name": "pdf2word-locale-tests",
   "private": true,
   "type": "module",
-  "description": "Smoke test della catena Pyodide + PyMuPDF wasm + pdf2docx"
+  "description": "Test end-to-end della PWA (Chrome headless)",
+  "devDependencies": {
+    "puppeteer-core": "^24.43.1"
+  }
 }

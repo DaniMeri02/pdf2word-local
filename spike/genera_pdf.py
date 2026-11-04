@@ -326,6 +326,16 @@ def misto(logo: Path, foto: Path):
     doc.build(s, onFirstPage=piede, onLaterPages=piede)
 
 
+# 6. PDF protetto da password (solo se PyMuPDF è installato) ------------------
+def protetto():
+    try:
+        import pymupdf
+    except ImportError:
+        return
+    with pymupdf.open(OUT / "1_lettera.pdf") as d:
+        d.save(OUT / "protetto_lettera.pdf", encryption=pymupdf.PDF_ENCRYPT_AES_256, user_pw="prova", owner_pw="prova-owner")
+
+
 if __name__ == "__main__":
     img = OUT / "_img"
     img.mkdir(exist_ok=True)
@@ -336,5 +346,6 @@ if __name__ == "__main__":
     due_colonne(foto)
     modulo()
     misto(logo, foto)
+    protetto()
     for p in sorted(OUT.glob("*.pdf")):
         print(p)

@@ -1,3 +1,7 @@
+---
+status: accepted, in parte superata da ADR-0002 (PyMuPDF dalla distribuzione Pyodide)
+---
+
 # pdf2docx dentro Pyodide, con una wheel PyMuPDF wasm compilata da noi
 
 Il PDF non deve mai lasciare il telefono, e serve un DOCX in flusso editabile con tabelle, colonne e immagini. Per questo il motore di conversione è pdf2docx (Python), eseguito nel browser con Pyodide. PyMuPDF non è distribuito per Pyodide e non si installa con micropip, per via delle librerie condivise. Lo compiliamo noi in GitHub Actions (`.github/workflows/build-pymupdf-wasm.yml`, procedura ufficiale tramite cibuildwheel) e lo pubblichiamo come release. La versione di Pyodide è fissata in `web/pyodide-version.txt`, e la wheel va ricompilata a ogni cambio di versione.
