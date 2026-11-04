@@ -1,4 +1,5 @@
-// UI strings. Language follows the device: Italian if the browser prefers it, English otherwise.
+// UI strings. Language follows the browser's preference order: the first preferred
+// language we have strings for wins (English if none matches).
 // Static text in index.html uses data-i18n="key"; scripts use t("key", {vars}).
 
 "use strict";
@@ -44,6 +45,7 @@ const STRINGS = {
     "footer.digital": "Works with digital PDFs (selectable text). Scanned PDFs are not supported.",
     "footer.privacy": "No uploads, no tracking.",
     "footer.source": "Source code",
+    "footer.build": "build {version}",
   },
   it: {
     "app.title": "PDF in Word",
@@ -85,10 +87,14 @@ const STRINGS = {
     "footer.digital": "Funziona con PDF digitali (testo selezionabile). I PDF scansionati non sono supportati.",
     "footer.privacy": "Nessun upload, nessun tracciamento.",
     "footer.source": "Codice sorgente",
+    "footer.build": "build {version}",
   },
 };
 
-const LANG = (navigator.languages || [navigator.language || "en"]).some((l) => /^it\b/i.test(l)) ? "it" : "en";
+const LANG =
+  (navigator.languages?.length ? navigator.languages : [navigator.language || "en"])
+    .map((l) => String(l).toLowerCase().split("-")[0])
+    .find((l) => l in STRINGS) ?? "en";
 
 function t(key, vars = {}) {
   const s = STRINGS[LANG][key] ?? STRINGS.en[key] ?? key;

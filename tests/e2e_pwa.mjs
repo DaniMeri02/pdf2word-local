@@ -14,10 +14,11 @@
 //  5. shared PDF (simulated POST to ./share, as Android does);
 //  6. offline mode: reload and convert without network;
 //  7. UI language follows the browser (English / Italian);
-//  8. diagnostic report: valid JSON with layout only, no document text.
+//  8. diagnostic report: valid JSON with layout only, no document text;
+//  9. build label in the footer, long file names fit a phone-width screen.
 
 import { createRequire } from "node:module";
-import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const require = createRequire(join(resolve("tests"), "package.json"));
@@ -217,6 +218,29 @@ try {
   const it = await itPage.$eval("h1", (e) => e.textContent);
   it === "PDF in Word" ? ok(`language: Italian UI ("${it}")`) : fail(`language: expected Italian, got "${it}"`);
   await itPage.close();
+  // Regression: English first, Italian only as a secondary language -> English.
+  const mixedPage = await browser.newPage();
+  await mixedPage.evaluateOnNewDocument(() => {
+    Object.defineProperty(navigator, "languages", { get: () => ["en-US", "en", "it-IT"] });
+  });
+  await mixedPage.goto(base, { waitUntil: "load" });
+  const mixed = await mixedPage.$eval("h1", (e) => e.textContent);
+  mixed === "PDF to Word" ? ok("language: English preferred over secondary Italian") : fail(`language: en-US first gave "${mixed}"`);
+  await mixedPage.close();
+
+  // 9. Build label and phone-width layout with a very long file name
+  const build = await page.$eval("#build", (e) => e.textContent);
+  /^build [0-9a-f]{12}$/.test(build) ? ok(`footer shows "${build}"`) : fail(`build label: "${build}"`);
+  if (pdfs[0]) {
+    const longName = "a_very_long_file_name_without_spaces_that_used_to_overflow_the_phone_screen_" + "x".repeat(60) + ".pdf";
+    const longPath = join(resolve(outDir), longName);
+    copyFileSync(resolve(pdfDir, pdfs[0]), longPath);
+    await page.setViewport({ width: 360, height: 800, isMobile: true });
+    const r = await convertFile(longPath);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    r.result && overflow <= 0 ? ok("long file name fits a 360 px screen") : fail(`long file name overflows by ${overflow}px`);
+    unlinkSync(longPath);
+  }
 
   // 2. No external requests
   external.length === 0 ? ok("no requests to other sites") : fail(`external requests: ${[...new Set(external)].join(", ")}`);

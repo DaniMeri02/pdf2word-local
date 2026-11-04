@@ -31,7 +31,8 @@ self.addEventListener("install", (ev) => {
   ev.waitUntil(
     caches
       .open(CACHE)
-      .then((c) => c.addAll(files.map((f) => new Request(f, { cache: "reload" }))))
+      // precache.js lists the files, so it is not in the list itself: add it explicitly.
+      .then((c) => c.addAll([...files, "vendor/precache.js"].map((f) => new Request(f, { cache: "reload" }))))
       .then(() => self.skipWaiting()),
   );
 });

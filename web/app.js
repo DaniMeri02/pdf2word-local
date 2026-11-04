@@ -2,7 +2,7 @@
 // with the engine and handles file choice, progress, password and download.
 // The PDF only travels between this page and the worker: no network requests.
 
-/* global t, applyStaticStrings */
+/* global t, applyStaticStrings, PRECACHE */
 "use strict";
 
 const $ = (id) => document.getElementById(id);
@@ -38,6 +38,7 @@ let current = null; // {id, name, pdf: ArrayBuffer, password, start}
 let docxUrl = null;
 let docxFile = null;
 let pending = null; // file received before the engine was ready
+let busy = false; // a conversion is running: do not reload for an update now
 
 function show(element, visible) {
   element.hidden = !visible;
@@ -72,8 +73,13 @@ async function waitForServiceWorker() {
   if (!("serviceWorker" in navigator)) throw new Error(t("error.noServiceWorker"));
   const sw = navigator.serviceWorker;
   const controlled = new Promise((ok) => sw.addEventListener("controllerchange", ok, { once: true }));
-  await sw.register("sw.js");
-  if (sw.controller) return;
+  // updateViaCache "none": update checks bypass the HTTP cache (GitHub Pages caches
+  // files for 10 minutes), otherwise a new version can go unnoticed.
+  await sw.register("sw.js", { updateViaCache: "none" });
+  if (sw.controller) {
+    watchForUpdates(sw);
+    return;
+  }
   // First run: the service worker downloads and caches the whole app.
   show(el.engineNote, true);
   engineState(t("engine.downloading"));
@@ -86,6 +92,15 @@ async function waitForServiceWorker() {
   session("set", "sw-reload");
   location.reload();
   await new Promise(() => {});
+}
+
+// A new version was published: the new service worker takes over (skipWaiting +
+// clients.claim) and the page reloads to use it. During a conversion it does not
+// reload: the new version is used the next time the app is opened.
+function watchForUpdates(sw) {
+  sw.addEventListener("controllerchange", () => {
+    if (!busy) location.reload();
+  });
 }
 
 // --- Worker -------------------------------------------------------------------
@@ -166,6 +181,7 @@ function convert(name, pdf, password) {
     return;
   }
   current = { id: (current?.id ?? 0) + 1, name, pdf, password, start: performance.now() };
+  busy = true;
   enableChoose(false);
   el.bar.value = 0;
   el.progressText.textContent = t("progress.opening");
@@ -206,6 +222,7 @@ function askPassword(wrong) {
 }
 
 function finish(errorMsg) {
+  busy = false;
   show(el.progress, false);
   if (errorMsg) showError(errorMsg);
   // Diagnostics are offered after a result or a conversion error, not while asking a password.
@@ -276,6 +293,7 @@ el.share.addEventListener("click", () => {
 
 (async () => {
   applyStaticStrings();
+  if (self.PRECACHE?.version) $("build").textContent = t("footer.build", { version: PRECACHE.version });
   try {
     await waitForServiceWorker();
     session("remove", "sw-reload");
