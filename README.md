@@ -33,6 +33,10 @@ The DOCX is saved to Downloads, or **Open with…** sends it straight to Word.
 - **Word for Android** opens documents in *mobile view*, which reflows and enlarges the text. Switch to **Print Layout** to see the real page.
 - Some mobile viewers (e.g. the "Documents" app on Realme phones) were seen showing a one-page document on two pages, while Word showed it on one. Prefer Word to open the DOCX.
 
+## Reporting a layout problem
+
+After a conversion, tap **"Something looks wrong? Create a diagnostic report"**. The report (`python/pdf2word/diagnostics.py`) contains only layout data: page sizes, block and image positions, font names and sizes, table shapes, DOCX sections and spacing, plus the software that produced the PDF. It contains no text and no images, so it can be shared to reproduce the problem without sharing the document. Check it before sharing.
+
 ## Layout
 
 | Path | Content |

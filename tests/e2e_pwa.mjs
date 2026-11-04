@@ -13,7 +13,8 @@
 //  4. protected PDF: password prompt, wrong password, right password;
 //  5. shared PDF (simulated POST to ./share, as Android does);
 //  6. offline mode: reload and convert without network;
-//  7. UI language follows the browser (English / Italian).
+//  7. UI language follows the browser (English / Italian);
+//  8. diagnostic report: valid JSON with layout only, no document text.
 
 import { createRequire } from "node:module";
 import { existsSync, mkdirSync, readdirSync, readFileSync, unlinkSync } from "node:fs";
@@ -121,6 +122,30 @@ try {
       const data = await downloadDocx(n.replace(/\.pdf$/, ".docx"));
       data.subarray(0, 2).toString() === "PK" ? ok(`${n}: ${r.text}`) : fail(`${n}: the output is not a DOCX`);
     } else fail(`${n}: ${r.error ?? "no outcome"}`);
+  }
+
+  // 1c. Diagnostic report: valid JSON, layout only, none of the document's words
+  {
+    const invoice = pdfs.find((n) => n.includes("invoice")) ?? pdfs[0];
+    await convertFile(resolve(pdfDir, invoice));
+    await page.click("#diag-button");
+    await page.waitForFunction(() => document.getElementById("diag-text").value.startsWith("{"), { timeout: CONVERSION_TIMEOUT });
+    const text = await page.$eval("#diag-text", (e) => e.value);
+    let report = null;
+    try {
+      report = JSON.parse(text);
+    } catch {
+      fail("diagnostics: report is not valid JSON");
+    }
+    if (report) {
+      // Distinctive words from spike/make_test_pdfs.py documents.
+      const leaked = ["ACME", "Faketown", "Testville", "Example", "INVOICE", "Supplier", "Beta Testing", "IBAN"]
+        .filter((w) => text.includes(w));
+      report.pdf?.pages >= 1 && Array.isArray(report.docx?.body)
+        ? ok(`diagnostics: ${invoice} -> ${text.length} chars, ${report.docx.body.length} DOCX items`)
+        : fail("diagnostics: report missing pdf/docx sections");
+      leaked.length === 0 ? ok("diagnostics: no document text in the report") : fail(`diagnostics: leaked ${leaked.join(", ")}`);
+    }
   }
 
   // 3. CSP: the page cannot reach other sites

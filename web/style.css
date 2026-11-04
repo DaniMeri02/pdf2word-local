@@ -100,5 +100,17 @@ progress { width: 100%; height: 0.6rem; accent-color: var(--primary); }
 
 .error { color: var(--error); margin: 1rem 0 0; }
 
+#diag-area { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: 0.75rem; }
+.link-button {
+  background: none; border: none; padding: 0; color: var(--primary);
+  font: inherit; font-size: 0.9rem; text-decoration: underline; cursor: pointer;
+}
+#diag-text {
+  width: 100%; margin: 0.5rem 0; padding: 0.5rem;
+  border: 1px solid var(--border); border-radius: 8px;
+  background: var(--background); color: var(--text);
+  font: 0.75rem/1.4 ui-monospace, Menlo, Consolas, monospace;
+}
+
 footer p { margin: 0.25rem 0; }
 footer a { color: var(--primary); }

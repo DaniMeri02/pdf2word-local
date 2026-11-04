@@ -2,19 +2,23 @@
 // Everything is loaded from vendor/ (same site); the service worker serves it from
 // the cache with a CSP that forbids connections to other sites.
 //
-// Incoming messages:  {type: "convert", id, pdf: ArrayBuffer, password?}
+// Incoming messages:  {type: "convert", id, pdf: ArrayBuffer, password?} |
+//                     {type: "diagnose", id, pdf: ArrayBuffer, docx?: ArrayBuffer, password?}
 // Outgoing messages:  {type: "status", key} | {type: "ready"} |
 //                     {type: "progress", id, done, total, phase} |
 //                     {type: "result", id, docx: ArrayBuffer} |
-//                     {type: "password", id, wrong} | {type: "error", id?, message}
+//                     {type: "password", id, wrong} | {type: "error", id?, message} |
+//                     {type: "diagnostics", id, text?, error?}
 
 /* global importScripts, loadPyodide */
 importScripts("vendor/pyodide/pyodide.js");
 
 const status = (key) => postMessage({ type: "status", key });
+let manifestVersion = null;
 
 async function start() {
   const manifest = await (await fetch("vendor/manifest.json")).json();
+  manifestVersion = `pyodide ${manifest.pyodide}`;
   status("engine.startingPython");
   const py = await loadPyodide({ indexURL: new URL("vendor/pyodide/", self.location).href });
 
@@ -94,8 +98,51 @@ _outcome
   }
 }
 
+// Layout-only report (no text, no images) to help reproduce conversion bugs.
+async function diagnose({ id, pdf, docx, password }) {
+  const py = await ready;
+  const FS = py.FS;
+  FS.writeFile("/diag.pdf", new Uint8Array(pdf));
+  if (docx) FS.writeFile("/diag.docx", new Uint8Array(docx));
+  py.globals.set("password_js", password ?? null);
+  py.globals.set("has_docx_js", Boolean(docx));
+  py.globals.set("app_version_js", manifestVersion);
+  try {
+    const text = py.runPython(`
+from pdf2word.diagnostics import report
+with open("/diag.pdf", "rb") as f:
+    _pdf = f.read()
+_docx = None
+if has_docx_js:
+    with open("/diag.docx", "rb") as f:
+        _docx = f.read()
+try:
+    _report = report(_pdf, _docx, password=password_js, extra={"app": app_version_js})
+finally:
+    del _pdf, _docx
+_report
+`);
+    postMessage({ type: "diagnostics", id, text });
+  } catch (e) {
+    const lines = String(e?.message ?? e).trim().split("\n");
+    postMessage({ type: "diagnostics", id, error: lines[lines.length - 1] });
+  } finally {
+    for (const f of ["/diag.pdf", "/diag.docx"]) {
+      try {
+        FS.unlink(f);
+      } catch {
+        /* already gone */
+      }
+    }
+    py.runPython("globals().pop('_report', None); globals().pop('password_js', None)");
+  }
+}
+
 onmessage = (ev) => {
-  if (ev.data?.type === "convert") {
-    convert(ev.data).catch((e) => postMessage({ type: "error", id: ev.data.id, message: String(e?.message ?? e) }));
+  const m = ev.data;
+  if (m?.type === "convert") {
+    convert(m).catch((e) => postMessage({ type: "error", id: m.id, message: String(e?.message ?? e) }));
+  } else if (m?.type === "diagnose") {
+    diagnose(m).catch((e) => postMessage({ type: "diagnostics", id: m.id, error: String(e?.message ?? e) }));
   }
 };

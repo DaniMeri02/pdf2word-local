@@ -24,12 +24,17 @@ const el = {
   download: $("download"),
   share: $("share"),
   error: $("error"),
+  diagArea: $("diag-area"),
+  diagButton: $("diag-button"),
+  diag: $("diag"),
+  diagText: $("diag-text"),
+  diagCopy: $("diag-copy"),
 };
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 let worker = null;
 let engineReady = false;
-let current = null; // {id, name, pdf: ArrayBuffer, start}
+let current = null; // {id, name, pdf: ArrayBuffer, password, start}
 let docxUrl = null;
 let docxFile = null;
 let pending = null; // file received before the engine was ready
@@ -112,6 +117,9 @@ function startWorker() {
       case "password":
         if (current?.id === m.id) askPassword(m.wrong);
         break;
+      case "diagnostics":
+        if (current?.id === m.id) showDiagnostics(m);
+        break;
       case "error":
         if (m.startup) {
           engineState(t("engine.unavailable"), "error");
@@ -143,6 +151,9 @@ function convert(name, pdf, password) {
   showError("");
   show(el.result, false);
   show(el.passwordForm, false);
+  show(el.diagArea, false);
+  show(el.diag, false);
+  docxFile = null;
   el.fileName.textContent = name;
   show(el.fileName, true);
   if (!isPdf(pdf)) {
@@ -154,7 +165,7 @@ function convert(name, pdf, password) {
     el.fileName.textContent = t("file.waiting", { name });
     return;
   }
-  current = { id: (current?.id ?? 0) + 1, name, pdf, start: performance.now() };
+  current = { id: (current?.id ?? 0) + 1, name, pdf, password, start: performance.now() };
   enableChoose(false);
   el.bar.value = 0;
   el.progressText.textContent = t("progress.opening");
@@ -197,8 +208,37 @@ function askPassword(wrong) {
 function finish(errorMsg) {
   show(el.progress, false);
   if (errorMsg) showError(errorMsg);
+  // Diagnostics are offered after a result or a conversion error, not while asking a password.
+  show(el.diagArea, Boolean(current) && el.passwordForm.hidden);
   enableChoose(engineReady);
   el.file.value = "";
+}
+
+// --- Diagnostic report (layout only) --------------------------------------------
+
+async function requestDiagnostics() {
+  if (!current) return;
+  el.diagText.value = t("diag.working");
+  el.diagCopy.textContent = t("diag.copy");
+  show(el.diag, true);
+  const pdf = current.pdf.slice(0);
+  const docx = docxFile ? await docxFile.arrayBuffer() : null;
+  const transfer = docx ? [pdf, docx] : [pdf];
+  worker.postMessage({ type: "diagnose", id: current.id, pdf, docx, password: current.password }, transfer);
+}
+
+function showDiagnostics({ text, error }) {
+  el.diagText.value = error ? t("diag.error", { message: error }) : text;
+}
+
+async function copyDiagnostics() {
+  try {
+    await navigator.clipboard.writeText(el.diagText.value);
+  } catch {
+    el.diagText.select(); // fallback: let the user copy it by hand
+    return;
+  }
+  el.diagCopy.textContent = t("diag.copied");
 }
 
 // --- PDF shared from another app (Web Share Target) ------------------------------
@@ -226,6 +266,9 @@ el.passwordForm.addEventListener("submit", (ev) => {
   ev.preventDefault();
   if (current) convert(current.name, current.pdf, el.password.value);
 });
+
+el.diagButton.addEventListener("click", requestDiagnostics);
+el.diagCopy.addEventListener("click", copyDiagnostics);
 
 el.share.addEventListener("click", () => {
   navigator.share({ files: [docxFile], title: docxFile.name }).catch(() => {});
