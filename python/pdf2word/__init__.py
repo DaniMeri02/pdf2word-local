@@ -14,6 +14,7 @@ import pymupdf
 from pdf2docx import Converter
 
 from .charts import rasterize_charts
+from .docx_fixes import fix_docx
 
 __all__ = ["convert", "PasswordRequired"]
 
@@ -44,6 +45,12 @@ class _PageProgress(logging.Handler):
 
 def convert(pdf: bytes, password: Optional[str] = None, progress: Optional[Progress] = None) -> bytes:
     """Convert the bytes of a digital PDF into the bytes of a DOCX."""
+    # Portability fixes for viewers other than Word desktop (see docx_fixes.py).
+    return fix_docx(convert_unfixed(pdf, password, progress))
+
+
+def convert_unfixed(pdf: bytes, password: Optional[str] = None, progress: Optional[Progress] = None) -> bytes:
+    """Chart pre-processing + pdf2docx, without the DOCX fixes (used by tests)."""
     doc = pymupdf.open(stream=pdf, filetype="pdf")
     if doc.needs_pass and not doc.authenticate(password or ""):
         raise PasswordRequired()

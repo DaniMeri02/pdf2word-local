@@ -7,7 +7,8 @@ PDF to editable Word (DOCX) converter that runs **entirely on your device**. The
 ## How it works
 
 - **Engine**: [pdf2docx](https://github.com/ArtifexSoftware/pdf2docx) rebuilds paragraphs, tables, images and columns into a DOCX with editable flow. It relies on [PyMuPDF](https://github.com/pymupdf/PyMuPDF).
-- **Pre-processing** (`python/pdf2word/`): charts made only of rectangles and lines are turned into images; otherwise pdf2docx would mistake them for empty tables.
+- **Pre-processing** (`python/pdf2word/charts.py`): charts made only of rectangles and lines are turned into images; otherwise pdf2docx would mistake them for empty tables. Thin filled rectangles (Word's table borders) are not charts.
+- **Post-processing** (`python/pdf2word/docx_fixes.py`): makes the DOCX portable beyond Word desktop. Table grids get the real column widths, rows grow instead of cutting text, and side-by-side blocks (e.g. logo and address) become a borderless table instead of multi-column sections.
 - **In the browser**: Python runs with [Pyodide](https://pyodide.org/) in a Web Worker, with PyMuPDF from the Pyodide distribution. Everything (about 45 MB) is served from the same site and cached by the service worker: after the first run it also works offline.
 - **Fallback**: the same engine runs on Android with Termux (`termux/install.sh`).
 
@@ -31,7 +32,7 @@ The DOCX is saved to Downloads, or **Open with…** sends it straight to Word.
 ## Known issues
 
 - **Word for Android** opens documents in *mobile view*, which reflows and enlarges the text. Switch to **Print Layout** to see the real page.
-- Some mobile viewers (e.g. the "Documents" app on Realme phones) were seen showing a one-page document on two pages, while Word showed it on one. Prefer Word to open the DOCX.
+- Some mobile viewers (e.g. the "Documents" app on Realme phones) showed a one-page document on two pages, most likely because of multi-column sections. Those sections are now replaced by tables (not yet confirmed on that viewer); if a viewer still misbehaves, prefer Word.
 
 ## Reporting a layout problem
 
@@ -45,6 +46,7 @@ After a conversion, tap **"Something looks wrong? Create a diagnostic report"**.
 | `spike/` | Desktop quality tests: generate synthetic PDFs and convert them |
 | `web/` | PWA: UI, translations, Web Worker, service worker, manifest |
 | `scripts/prepare_vendor.py` | Download and verify (sha256) Pyodide and packages into `web/vendor/` |
+| `tests/test_*.py` | Engine regression tests (chart detection, DOCX fixes) |
 | `tests/e2e_pwa.mjs` | End-to-end test in headless Chrome, run before every deploy |
 | `termux/` | Command-line fallback for Termux |
 | `.github/workflows/pages.yml` | Prepare, test and publish to GitHub Pages |
