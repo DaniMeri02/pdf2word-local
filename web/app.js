@@ -29,6 +29,7 @@ const el = {
   diag: $("diag"),
   diagText: $("diag-text"),
   diagCopy: $("diag-copy"),
+  diagShare: $("diag-share"),
 };
 
 const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
@@ -237,6 +238,7 @@ async function requestDiagnostics() {
   if (!current) return;
   el.diagText.value = t("diag.working");
   el.diagCopy.textContent = t("diag.copy");
+  show(el.diagShare, false);
   show(el.diag, true);
   const pdf = current.pdf.slice(0);
   const docx = docxFile ? await docxFile.arrayBuffer() : null;
@@ -246,6 +248,12 @@ async function requestDiagnostics() {
 
 function showDiagnostics({ text, error }) {
   el.diagText.value = error ? t("diag.error", { message: error }) : text;
+  // Android share sheet (WhatsApp, Gmail…): the easy way to get the report off the phone.
+  show(el.diagShare, !error && typeof navigator.share === "function");
+}
+
+function shareDiagnostics() {
+  navigator.share({ title: "pdf2word-local diagnostics", text: el.diagText.value }).catch(() => {});
 }
 
 async function copyDiagnostics() {
@@ -286,6 +294,7 @@ el.passwordForm.addEventListener("submit", (ev) => {
 
 el.diagButton.addEventListener("click", requestDiagnostics);
 el.diagCopy.addEventListener("click", copyDiagnostics);
+el.diagShare.addEventListener("click", shareDiagnostics);
 
 el.share.addEventListener("click", () => {
   navigator.share({ files: [docxFile], title: docxFile.name }).catch(() => {});

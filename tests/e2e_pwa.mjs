@@ -129,6 +129,12 @@ try {
   {
     const invoice = pdfs.find((n) => n.includes("invoice")) ?? pdfs[0];
     await convertFile(resolve(pdfDir, invoice));
+    // Stub the share sheet to capture what would be shared.
+    await page.evaluate(() => {
+      navigator.share = async (data) => {
+        window.__shared = data;
+      };
+    });
     await page.click("#diag-button");
     await page.waitForFunction(() => document.getElementById("diag-text").value.startsWith("{"), { timeout: CONVERSION_TIMEOUT });
     const text = await page.$eval("#diag-text", (e) => e.value);
@@ -146,6 +152,9 @@ try {
         ? ok(`diagnostics: ${invoice} -> ${text.length} chars, ${report.docx.body.length} DOCX items`)
         : fail("diagnostics: report missing pdf/docx sections");
       leaked.length === 0 ? ok("diagnostics: no document text in the report") : fail(`diagnostics: leaked ${leaked.join(", ")}`);
+      await page.click("#diag-share");
+      const sharedText = await page.evaluate(() => window.__shared?.text ?? null);
+      sharedText === text ? ok("diagnostics: share button sends the report") : fail("diagnostics: share button did not send the report");
     }
   }
 
