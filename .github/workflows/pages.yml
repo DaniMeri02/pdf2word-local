@@ -2,9 +2,10 @@
 #
 # 1. scripts/prepare_vendor.py downloads (sha256-checked) the Pyodide runtime,
 #    packages (PyMuPDF included) and PyPI wheels into web/vendor/
-# 2. tests/e2e_pwa.mjs opens the app in headless Chrome and converts test PDFs:
+# 2. tests/test_*.py: engine regression tests (e.g. Word table borders vs charts)
+# 3. tests/e2e_pwa.mjs opens the app in headless Chrome and converts test PDFs:
 #    file picker, password, share target, offline, no external requests
-# 3. deploy to Pages
+# 4. deploy to Pages
 #
 # One-time prerequisite: Settings -> Pages -> Source: "GitHub Actions".
 
@@ -39,10 +40,13 @@ jobs:
       - name: Prepare web/vendor
         run: python scripts/prepare_vendor.py
 
-      - name: Generate test PDFs
+      - name: Engine regression tests
         run: |
-          pip install reportlab numpy opencv-python-headless pymupdf
-          python spike/make_test_pdfs.py e2e-pdf
+          pip install reportlab numpy opencv-python-headless pymupdf pdf2docx
+          python -m unittest discover -s tests -p "test_*.py" -v
+
+      - name: Generate test PDFs
+        run: python spike/make_test_pdfs.py e2e-pdf
 
       - uses: actions/setup-node@v4
         with:

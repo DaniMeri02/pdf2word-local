@@ -9,6 +9,8 @@ same area (axis labels included).
 
 Heuristic to tell a chart from a table: in tables, coloured fills are cell
 backgrounds and contain text; in charts, bars are coloured fills with no text.
+Thin filled rectangles are lines, not bars: Word's PDF export draws table borders
+that way, and counting them as bars turned whole tables into images.
 """
 
 from __future__ import annotations
@@ -19,6 +21,8 @@ import pymupdf
 WHITE_THRESHOLD = 0.95
 # How many text-free fills are needed to treat an area as a chart.
 MIN_EMPTY_FILLS = 3
+# A filled rectangle thinner than this (pt) is a line (e.g. a table border), not a bar.
+MIN_BAR_THICKNESS = 2.0
 # Max distance (pt) within which axis labels are absorbed into the chart.
 LABEL_MARGIN = 14.0
 # An axis label is short: narrower than this fraction of the chart.
@@ -44,6 +48,10 @@ def _text_lines(page: pymupdf.Page) -> list[pymupdf.Rect]:
     return lines
 
 
+def _is_bar(rect: pymupdf.Rect) -> bool:
+    return min(rect.width, rect.height) >= MIN_BAR_THICKNESS
+
+
 def _contains_text(area: pymupdf.Rect, lines: list[pymupdf.Rect]) -> bool:
     inner = area + (1, 1, -1, -1)
     return any(inner.intersects(r) for r in lines)
@@ -63,6 +71,7 @@ def find_charts(page: pymupdf.Page) -> list[pymupdf.Rect]:
             if d.get("fill") is not None
             and not _near_white(d["fill"])
             and _rects_only(d)
+            and _is_bar(d["rect"])
             and not _contains_text(d["rect"], lines)
         ]
         if len(empty) < MIN_EMPTY_FILLS:
